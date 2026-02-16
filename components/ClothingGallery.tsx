@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import type { ClothingItem } from '../types';
 import UploadIcon from './icons/UploadIcon';
+import { readUploadImageFile } from '../utils/imageFile';
 
 interface ClothingGalleryProps {
   items: ClothingItem[];
@@ -43,12 +44,11 @@ const ClothingGallery: React.FC<ClothingGalleryProps> = ({
     onItemInvalidated?.(id);
   };
 
-  const handleFileUpload = (id: number, event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (id: number, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && onUpdateItem) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const base64 = e.target?.result as string;
+      try {
+        const { base64 } = await readUploadImageFile(file);
         onUpdateItem(id, base64);
         // Reset broken state if it was broken before
         setBrokenImages(prev => {
@@ -61,8 +61,11 @@ const ClothingGallery: React.FC<ClothingGalleryProps> = ({
         if (updatedItem) {
             onSelectItem({ ...updatedItem, imageSrc: base64 });
         }
-      };
-      reader.readAsDataURL(file);
+      } catch (error) {
+        window.alert(
+          error instanceof Error ? error.message : 'Не удалось загрузить изображение.'
+        );
+      }
     }
   };
 
@@ -123,7 +126,7 @@ const ClothingGallery: React.FC<ClothingGalleryProps> = ({
                     <input
                         type="file"
                         className="hidden"
-                        accept="image/*"
+                        accept="image/png, image/jpeg, image/webp, image/heic, image/heif, .heic, .heif"
                         ref={(el) => { fileInputRefs.current[item.id] = el; }}
                         onChange={(e) => handleFileUpload(item.id, e)}
                     />

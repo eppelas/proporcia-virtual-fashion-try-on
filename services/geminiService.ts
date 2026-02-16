@@ -10,14 +10,12 @@ const fileToGenerativePart = (base64: string, mimeType: string) => {
 };
 
 const getApiKeyOrThrow = (apiKey?: string): string => {
-  const key = apiKey || process.env.API_KEY;
-  if (!key) {
-    throw new Error("API key is not configured");
+  if (!apiKey?.trim()) {
+    throw new Error("Введите Gemini API key.");
   }
-  return key;
+  return apiKey.trim();
 };
 
-// VALIDATION SERVICE
 export const validateUserImage = async (
   base64Image: string,
   mimeType: string,
@@ -45,7 +43,7 @@ export const validateUserImage = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-latest', // Fast vision model for validation
+      model: 'gemini-2.5-flash-latest',
       contents: {
         parts: [imagePart, { text: prompt }],
       },
@@ -68,13 +66,10 @@ export const validateUserImage = async (
     return { isValid: false, message: "Не удалось проверить изображение." };
   } catch (error) {
     console.error("Validation error:", error);
-    // Allow pass-through on API error to not block user completely if service is down, 
-    // or block if strict. Let's allow but log.
-    return { isValid: true }; 
+    throw new Error("Не удалось проверить изображение. Проверьте API key и повторите.");
   }
 };
 
-// GENERATION SERVICE
 export const generateVirtualTryOnImage = async (
   personImage: { base64: string; mimeType: string },
   clothingImage: { base64: string; mimeType: string },
@@ -85,13 +80,25 @@ export const generateVirtualTryOnImage = async (
   const personImagePart = fileToGenerativePart(personImage.base64, personImage.mimeType);
   const clothingImagePart = fileToGenerativePart(clothingImage.base64, clothingImage.mimeType);
 
-  // Updated prompt: Stricter clothing preservation
   const prompt = `
     Task: High-End Virtual Fashion Try-On.
     Input 1: Person (Target).
     Input 2: Clothing Item (Source).
 
     CORE OBJECTIVE: Dress the Person in Input 1 with the Clothing from Input 2.
+
+    ABSOLUTE BODY GEOMETRY LOCK (HIGHEST PRIORITY):
+    1. Do NOT alter the person's body shape, body volume, or proportions.
+    2. Preserve exact silhouette and thickness from Input 1, especially:
+       - shoulder width
+       - neck thickness
+       - chest/bust volume
+       - upper arm and forearm thickness
+       - waist and abdomen volume
+       - hip, thigh, and calf thickness
+    3. Never "slim down" or narrow any body part.
+    4. If there is ambiguity, keep the body in the result equal to or slightly fuller than Input 1, never smaller.
+    5. Garment fit must adapt to the real body shape from Input 1, not vice versa.
 
     STRICT RULES FOR CLOTHING (SOURCE) PRESERVATION:
     1. TEXTURE & MATERIAL: You MUST preserve the exact fabric texture (silk, cotton, velvet, denim) of Input 2. Do not smoothen it or change its reflective properties.
@@ -103,7 +110,7 @@ export const generateVirtualTryOnImage = async (
 
     STRICT RULES FOR PERSON (TARGET) PRESERVATION:
     1. BACKGROUND: Do NOT change pixels of the background.
-    2. BODY: Do NOT change the person's legs, shoes, face, hair, or hands. Only generate pixels where the new clothing covers the body.
+    2. BODY: Do NOT change the person's legs, shoes, face, hair, hands, or body proportions. Only generate pixels where the new clothing covers the body.
     3. LIGHTING: Keep the original lighting direction and temperature of the Person's photo. Cast realistic shadows from the new clothing onto the person/ground based on this lighting.
 
     FINAL OUTPUT:
@@ -112,7 +119,7 @@ export const generateVirtualTryOnImage = async (
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-image-preview', 
+    model: 'gemini-3-pro-image-preview',
     contents: {
       parts: [
         personImagePart,
@@ -132,8 +139,8 @@ export const generateVirtualTryOnImage = async (
   for (const part of response.candidates[0].content.parts) {
     if (part.inlineData) {
       const base64ImageBytes = part.inlineData.data;
-      const mimeType = part.inlineData.mimeType || 'image/png';
-      return `data:${mimeType};base64,${base64ImageBytes}`;
+      const generatedMimeType = part.inlineData.mimeType || 'image/png';
+      return `data:${generatedMimeType};base64,${base64ImageBytes}`;
     }
   }
   

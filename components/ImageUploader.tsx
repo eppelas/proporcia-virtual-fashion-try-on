@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import UploadIcon from './icons/UploadIcon';
+import { readUploadImageFile } from '../utils/imageFile';
 
 interface ImageUploaderProps {
   onImageUpload: (fileData: { base64: string; mimeType: string }) => void;
@@ -9,15 +10,17 @@ interface ImageUploaderProps {
 const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, userImage }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const base64 = e.target?.result as string;
-        onImageUpload({ base64, mimeType: file.type });
-      };
-      reader.readAsDataURL(file);
+      try {
+        const imageData = await readUploadImageFile(file);
+        onImageUpload(imageData);
+      } catch (error) {
+        window.alert(
+          error instanceof Error ? error.message : 'Не удалось загрузить изображение.'
+        );
+      }
     }
   };
 
@@ -28,7 +31,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, userImage 
         ref={fileInputRef}
         onChange={handleFileChange}
         className="hidden"
-        accept="image/png, image/jpeg, image/webp"
+        accept="image/png, image/jpeg, image/webp, image/heic, image/heif, .heic, .heif"
       />
       
       <div

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Header from './components/Header';
 import ClothingGallery from './components/ClothingGallery';
 import ImageUploader from './components/ImageUploader';
@@ -9,11 +9,21 @@ import { CLOTHING_DB } from './data/clothingDb';
 import type { ClothingItem } from './types';
 import { generateVirtualTryOnImage, validateUserImage } from './services/geminiService';
 
-// Add type definition for window.aistudio
+interface DetectedFace {
+  boundingBox: DOMRectReadOnly;
+}
+
+interface FaceDetectorInstance {
+  detect: (image: HTMLImageElement) => Promise<DetectedFace[]>;
+}
+
+interface FaceDetectorConstructor {
+  new (options?: { maxDetectedFaces?: number; fastMode?: boolean }): FaceDetectorInstance;
+}
+
 declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
+  interface Window {
+    FaceDetector?: FaceDetectorConstructor;
   }
 }
 
@@ -26,28 +36,83 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState<boolean>(false);
-  const [apiKeyConfigured, setApiKeyConfigured] = useState<boolean>(
-    Boolean(process.env.API_KEY) || (typeof window !== 'undefined' && Boolean(window.localStorage.getItem('GEMINI_API_KEY')))
-  );
+  const [apiKey, setApiKey] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return window.localStorage.getItem('GEMINI_API_KEY') || '';
+  });
+  const [showApiKey, setShowApiKey] = useState<boolean>(false);
 
-  const resolveApiKey = (): string => {
-    if (process.env.API_KEY) return process.env.API_KEY;
-    if (typeof window === 'undefined') {
-      throw new Error('API key unavailable in this environment');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (apiKey.trim()) {
+      window.localStorage.setItem('GEMINI_API_KEY', apiKey.trim());
+      return;
+    }
+    window.localStorage.removeItem('GEMINI_API_KEY');
+  }, [apiKey]);
+
+  const loadImageElement = (base64: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Не удалось прочитать изображение.'));
+      image.src = base64;
+    });
+  };
+
+  const validateUploadedPhotoLocally = async (
+    base64: string
+  ): Promise<{ isValid: boolean; message?: string }> => {
+    const image = await loadImageElement(base64);
+    const detectorCtor = window.FaceDetector;
+    if (!detectorCtor) {
+      return {
+        isValid: false,
+        message:
+          'Ваш браузер не поддерживает автоматическую проверку фото. Откройте приложение в Chrome.',
+      };
     }
 
-    const existing = window.localStorage.getItem('GEMINI_API_KEY');
-    if (existing) return existing;
-
-    const entered = window.prompt('Введите GEMINI_API_KEY для текущего браузера. Ключ сохранится только локально.');
-    if (!entered || !entered.trim()) {
-      throw new Error('API key не указан. Добавьте ключ и повторите попытку.');
+    const detector = new detectorCtor({ maxDetectedFaces: 1, fastMode: true });
+    const faces = await detector.detect(image);
+    if (!faces.length) {
+      return {
+        isValid: false,
+        message: 'Похоже, это не фото человека. Загрузите портрет или фото в полный рост.',
+      };
     }
 
-    const normalized = entered.trim();
-    window.localStorage.setItem('GEMINI_API_KEY', normalized);
-    setApiKeyConfigured(true);
-    return normalized;
+    const faceHeightRatio = faces[0].boundingBox.height / image.height;
+    if (faceHeightRatio > 0.42) {
+      return {
+        isValid: false,
+        message: 'Слишком крупный портрет. Нужна фигура хотя бы примерно на 2/3 кадра.',
+      };
+    }
+
+    return { isValid: true };
+  };
+
+  const handleUserImageUpload = async (fileData: { base64: string; mimeType: string }) => {
+    setError(null);
+    try {
+      const localValidation = await validateUploadedPhotoLocally(fileData.base64);
+      if (!localValidation.isValid) {
+        setUserImageData(null);
+        setGeneratedImage(null);
+        setError(localValidation.message || 'Фото не подходит для примерки.');
+        return;
+      }
+      setUserImageData(fileData);
+    } catch (validationError) {
+      setUserImageData(null);
+      setGeneratedImage(null);
+      setError(
+        validationError instanceof Error
+          ? validationError.message
+          : 'Не удалось проверить изображение.'
+      );
+    }
   };
 
   const handleItemUpdate = (id: number, newSrc: string) => {
@@ -107,29 +172,23 @@ const App: React.FC = () => {
       return;
     }
 
-    // MANDATORY: Check for API Key selection in AI Studio bridge (if available)
-    if (window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasKey) {
-            await window.aistudio.openSelectKey();
-            const hasKeyAfter = await window.aistudio.hasSelectedApiKey();
-            if(!hasKeyAfter) {
-                setError("Необходимо выбрать API ключ для использования Nano Banana Pro");
-                return;
-            }
-        }
-    }
-
     setIsLoading(true);
     setError(null);
     setGeneratedImage(null); // Clear previous result
     
     try {
-      const apiKey = resolveApiKey();
+      const normalizedApiKey = apiKey.trim();
+      if (!normalizedApiKey) {
+        throw new Error('Введите Gemini API key в поле выше.');
+      }
 
       // STEP 1: Validate User Image using AI
       // We check if it's a full body shot suitable for try-on
-      const validation = await validateUserImage(userImageData.base64, userImageData.mimeType, apiKey);
+      const validation = await validateUserImage(
+        userImageData.base64,
+        userImageData.mimeType,
+        normalizedApiKey
+      );
       
       if (!validation.isValid) {
         throw new Error(validation.message || "Фотография не подходит. Пожалуйста, загрузите фото человека во весь рост.");
@@ -137,37 +196,28 @@ const App: React.FC = () => {
 
       // STEP 2: Generate Try-On
       const clothingImageData = await processImageSource(selectedClothing.imageSrc);
-      const resultImage = await generateVirtualTryOnImage(userImageData, clothingImageData, apiKey);
+      const resultImage = await generateVirtualTryOnImage(
+        userImageData,
+        clothingImageData,
+        normalizedApiKey
+      );
       setGeneratedImage(resultImage);
 
     } catch (e) {
       console.error(e);
-      if (e instanceof Error && e.message.includes("Requested entity was not found")) {
-         if (window.aistudio) {
-             await window.aistudio.openSelectKey();
-         }
-         setError("Пожалуйста, выберите корректный API ключ.");
-      } else {
-         setError(e instanceof Error ? e.message : "Ошибка генерации");
-      }
+      setError(e instanceof Error ? e.message : "Ошибка генерации");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const isButtonDisabled = !selectedClothing || !userImageData || isLoading;
+  const isButtonDisabled = !selectedClothing || !userImageData || !apiKey.trim() || isLoading;
 
   return (
     <div className="min-h-screen bg-white text-black font-sans selection:bg-black selection:text-white flex flex-col">
       <Header />
       
       <main className="container mx-auto px-4 pt-4 pb-6 max-w-4xl flex-grow flex flex-col">
-        {!apiKeyConfigured && (
-          <div className="mb-4 border border-amber-300 bg-amber-50 text-amber-900 px-4 py-3 text-xs">
-            API key не задан в build. При первом запуске примерки приложение запросит GEMINI_API_KEY и сохранит его в этом браузере.
-          </div>
-        )}
-        
         {/* SECTION 1: GALLERY */}
         <div className="mb-6">
              <ClothingGallery 
@@ -193,7 +243,7 @@ const App: React.FC = () => {
                 </button>
 
                 <ImageUploader 
-                    onImageUpload={setUserImageData}
+                    onImageUpload={handleUserImageUpload}
                     userImage={userImageData?.base64 || null}
                 />
             </div>
@@ -206,6 +256,31 @@ const App: React.FC = () => {
                     error={error}
                 />
             </div>
+        </div>
+
+        <div className="mb-4">
+          <label htmlFor="api-key-input" className="block text-[10px] uppercase tracking-[0.2em] font-bold mb-2">
+            Введите код (Gemini API key)
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="api-key-input"
+              type={showApiKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder="AIza..."
+              spellCheck={false}
+              autoComplete="off"
+              className="flex-1 w-full border border-gray-300 px-4 py-3 text-xs font-mono tracking-wide bg-white focus:outline-none focus:border-black"
+            />
+            <button
+              type="button"
+              onClick={() => setShowApiKey((current) => !current)}
+              className="px-4 border border-gray-300 text-[10px] uppercase tracking-[0.12em] font-bold hover:border-black transition-colors"
+            >
+              {showApiKey ? 'Скрыть' : 'Показать'}
+            </button>
+          </div>
         </div>
 
         {/* SECTION 3: BUTTON */}
@@ -273,6 +348,6 @@ const App: React.FC = () => {
       )}
     </div>
   );
-};
+  };
 
 export default App;
