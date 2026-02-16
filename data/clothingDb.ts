@@ -1,74 +1,49 @@
 import type { ClothingItem } from '../types';
 
-// База луков для галереи.
-// Все предустановленные карточки используют локальные изображения из `public/images`,
-// чтобы выбор карточки и примерка работали стабильно на локальном запуске.
+const imagePath = (fileName: string): string => `${import.meta.env.BASE_URL}images/${fileName}`;
 
+// База товаров для примерки (взято с proporcia.store).
+// Используем локальные копии изображений из `public/images`,
+// чтобы галерея стабильно работала и в локальном режиме, и на GitHub Pages.
 export const CLOTHING_DB: ClothingItem[] = [
   {
     id: 1,
-    name: 'Look 01',
-    imageSrc: '/images/look-1.jpeg',
+    name: 'Рубашка MOOVI',
+    imageSrc: imagePath('rubashka-moovi.jpg'),
   },
   {
     id: 2,
-    name: 'Look 02',
-    imageSrc: '/images/look-2.jpeg',
+    name: 'Платье Flexi',
+    imageSrc: imagePath('plate-flexi.jpg'),
   },
   {
     id: 3,
-    name: 'Look 03',
-    imageSrc: '/images/look-3.jpeg',
+    name: 'Платье NEO',
+    imageSrc: imagePath('plate-neo.jpeg'),
   },
   {
     id: 4,
-    name: 'Look 04',
-    imageSrc: '/images/look-4.jpeg',
+    name: 'Платье Taily',
+    imageSrc: imagePath('plate-taily.jpg'),
   },
   {
     id: 5,
-    name: 'Look 05',
-    imageSrc: '/images/look-5.jpeg',
+    name: 'Платье-жакет Jackess',
+    imageSrc: imagePath('plate-zhaket-jackess.jpg'),
   },
   {
     id: 6,
-    name: 'Look 06',
-    imageSrc: '/images/look-1.jpeg',
+    name: 'Лонгслив NAKED',
+    imageSrc: imagePath('longsliv-naked.jpeg'),
   },
   {
     id: 7,
-    name: 'Look 07',
-    imageSrc: '/images/look-3.jpeg',
+    name: 'Костюм CUT',
+    imageSrc: imagePath('kostyum-cut.webp'),
   },
   {
     id: 8,
-    name: 'Шубка (замена)',
-    imageSrc: '/images/look-2.jpeg',
-  },
-
-  // Слоты для загрузки своих вещей.
-  {
-    id: 9,
-    name: 'Загрузить фото 1',
-    imageSrc: '',
-    isUploadable: true,
-  },
-  {
-    id: 10,
-    name: 'Загрузить фото 2',
-    imageSrc: '',
-    isUploadable: true,
-  },
-  {
-    id: 11,
-    name: 'Загрузить фото 3',
-    imageSrc: '',
-    isUploadable: true,
-  },
-  {
-    id: 12,
-    name: 'Загрузить фото 4',
-    imageSrc: '',
-    isUploadable: true,
+    name: 'Юбка BALI',
+    imageSrc: imagePath('yubka-bali.jpg'),
   }
 ];

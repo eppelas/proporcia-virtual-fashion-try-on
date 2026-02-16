@@ -10,7 +10,7 @@ interface ClothingGalleryProps {
   onItemInvalidated?: (id: number) => void;
 }
 
-const ITEMS_PER_PAGE = 12; // Show all 12 items (3 rows of 4)
+const ITEMS_PER_PAGE = 8; // Show all available preset items (2 rows of 4)
 
 const ClothingGallery: React.FC<ClothingGalleryProps> = ({ 
   items, 

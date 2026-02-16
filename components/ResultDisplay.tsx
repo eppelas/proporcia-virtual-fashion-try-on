@@ -75,6 +75,18 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, isLoading
                       <MaximizeIcon className="w-4 h-4" />
                     </button>
                 </div>
+
+                {/* Always-visible download CTA */}
+                <div className="absolute left-3 right-3 bottom-3">
+                  <button
+                    onClick={handleDownload}
+                    className="w-full bg-black text-white py-3 text-[11px] font-bold uppercase tracking-[0.15em] flex items-center justify-center gap-2 hover:bg-gray-900 transition-colors shadow-lg"
+                    title="Скачать результат"
+                  >
+                    <DownloadIcon className="w-4 h-4" />
+                    Скачать результат
+                  </button>
+                </div>
              </div>
           ) : (
               !isLoading && !error && (
