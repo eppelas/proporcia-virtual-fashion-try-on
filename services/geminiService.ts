@@ -1,4 +1,5 @@
 import { GoogleGenAI, Modality, Type } from "@google/genai";
+import type { ClothingFitHint, ClothingLengthHint, ClothingView } from "../types";
 
 const fileToGenerativePart = (base64: string, mimeType: string) => {
   return {
@@ -14,6 +15,76 @@ const getApiKeyOrThrow = (apiKey?: string): string => {
     throw new Error("Введите Gemini API key.");
   }
   return apiKey.trim();
+};
+
+type OutputAspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+
+const ASPECT_RATIO_CANDIDATES: Array<{ label: OutputAspectRatio; value: number }> = [
+  { label: '1:1', value: 1 },
+  { label: '3:4', value: 3 / 4 },
+  { label: '4:3', value: 4 / 3 },
+  { label: '9:16', value: 9 / 16 },
+  { label: '16:9', value: 16 / 9 },
+];
+
+const loadImageDimensionsFromDataUrl = (
+  dataUrl: string
+): Promise<{ width: number; height: number }> =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height });
+    image.onerror = () => reject(new Error('Не удалось прочитать размеры изображения.'));
+    image.src = dataUrl;
+  });
+
+const getClosestAspectRatio = (width: number, height: number): OutputAspectRatio => {
+  if (!width || !height) return '3:4';
+  const ratio = width / height;
+
+  let best = ASPECT_RATIO_CANDIDATES[0];
+  let bestDiff = Math.abs(ratio - best.value);
+
+  for (const candidate of ASPECT_RATIO_CANDIDATES) {
+    const diff = Math.abs(ratio - candidate.value);
+    if (diff < bestDiff) {
+      best = candidate;
+      bestDiff = diff;
+    }
+  }
+
+  return best.label;
+};
+
+const VALIDATION_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+];
+
+const isModelNotFoundError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes('is not found') || message.includes('not_found');
+};
+
+const generateWithFallback = async (
+  ai: GoogleGenAI,
+  requestFactory: (model: string) => Parameters<typeof ai.models.generateContent>[0]
+) => {
+  let lastError: unknown = null;
+
+  for (const model of VALIDATION_MODELS) {
+    try {
+      return await ai.models.generateContent(requestFactory(model));
+    } catch (error) {
+      lastError = error;
+      if (!isModelNotFoundError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error('Не удалось выбрать доступную модель проверки.');
 };
 
 export const validateUserImage = async (
@@ -42,8 +113,8 @@ export const validateUserImage = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-latest',
+    const response = await generateWithFallback(ai, (model) => ({
+      model,
       contents: {
         parts: [imagePart, { text: prompt }],
       },
@@ -58,7 +129,7 @@ export const validateUserImage = async (
           required: ["isValid", "message"],
         },
       },
-    });
+    }));
 
     if (response.text) {
       return JSON.parse(response.text);
@@ -70,59 +141,215 @@ export const validateUserImage = async (
   }
 };
 
+export type UserPose = ClothingView | 'unknown';
+
+export interface UserPhotoAnalysis {
+  isValid: boolean;
+  message?: string;
+  pose: UserPose;
+  bodyCoverage: 'full' | 'two_thirds' | 'portrait' | 'unknown';
+}
+
+export type TryOnModelMode = 'pro' | 'flash';
+export type TryOnGenerationStage = 'fit' | 'outpaint_bottom';
+
+const buildTryOnPrompt = (
+  fitContext?: {
+    userPose?: UserPose;
+    clothingView?: ClothingView;
+    bodyCoverage?: string;
+    clothingName?: string;
+    clothingFitHint?: ClothingFitHint;
+    clothingLengthHint?: ClothingLengthHint;
+    designNotes?: string;
+    isLongGarment?: boolean;
+    forceTallCanvas?: boolean;
+    generationStage?: TryOnGenerationStage;
+  }
+): string => {
+  const stage = fitContext?.generationStage || 'fit';
+
+  if (stage === 'outpaint_bottom') {
+    return `
+Task: Anchored bottom outpaint for a virtual try-on result.
+
+Image A: target person image that is already dressed and anchored at top, with extra space below.
+Image B: clothing reference (garment design only).
+
+Context:
+- user pose: ${fitContext?.userPose || 'unknown'}
+- clothing view: ${fitContext?.clothingView || 'unknown'}
+- clothing name: ${fitContext?.clothingName || 'unknown'}
+- clothing fit: ${fitContext?.clothingFitHint || 'unknown'}
+- clothing length: ${fitContext?.clothingLengthHint || 'unknown'}
+- design notes: ${fitContext?.designNotes || 'none'}
+
+Hard rules:
+1) Keep exactly one person: the same person from Image A.
+2) Preserve identity, face, hair, shoulders, torso, arm thickness, pose, and camera geometry from Image A.
+   Face is immutable: do not alter facial shape, eyes, nose, lips, skin tone, expression.
+3) Keep upper body and original framed area unchanged; do not redraw the whole image.
+4) Do not copy body shape, pose, face, shoes, accessories, or background from Image B.
+5) Extend only the lower garment continuation into the added bottom area.
+6) Preserve garment material, cut, hem, asymmetry/slit/wrap details from Image B.
+   Existing garment pixels already visible in Image A are immutable; only continue them below.
+7) Do not horizontally stretch or slim the person.
+8) Output must look like a natural continuation of Image A, not a new composition.
+9) Preserve garment length class precisely:
+   - short: above knee
+   - midi: below knee
+   - maxi: around ankle, MUST NOT touch ground
+   - floor: near floor
+10) Never re-design garment silhouette during outpaint: no new flare, no extra train, no hem widening.
+`;
+  }
+
+  return `
+Task: High-accuracy virtual try-on.
+
+Image A: target person (identity and body geometry source).
+Image B: clothing reference (garment source only).
+
+Context:
+- user pose: ${fitContext?.userPose || 'unknown'}
+- clothing view: ${fitContext?.clothingView || 'unknown'}
+- body coverage: ${fitContext?.bodyCoverage || 'unknown'}
+- clothing name: ${fitContext?.clothingName || 'unknown'}
+- clothing fit: ${fitContext?.clothingFitHint || 'unknown'}
+- clothing length: ${fitContext?.clothingLengthHint || 'unknown'}
+- design notes: ${fitContext?.designNotes || 'none'}
+- long garment mode: ${fitContext?.isLongGarment ? 'on' : 'off'}
+
+Hard rules:
+1) Exactly one person in output: the same person from Image A.
+2) Preserve identity, face, hair, shoulders, chest, torso, arms, hips, and overall proportions from Image A.
+   Face is immutable: do not alter facial shape, eyes, nose, lips, skin tone, expression.
+3) Preserve pose, perspective, and background from Image A.
+4) Do not copy model identity/body/pose/background from Image B.
+5) Transfer only the garment from Image B: material, cut, fit, seams, silhouette, hem, asymmetry/slit/wrap.
+   Garment geometry is immutable: preserve structure and proportions of pattern pieces and silhouette.
+6) Keep body width and scale from Image A. No slimming, no widening, no horizontal stretch.
+7) For long garments, preserve true length and hem geometry; do not shorten to fit frame.
+8) If hem is out of frame, keep person proportions fixed and prioritize natural garment continuation.
+9) Preserve garment length class precisely:
+   - short: above knee
+   - midi: below knee
+   - maxi: around ankle, MUST NOT touch ground
+   - floor: near floor
+10) Do not invent extra flare/train/volume. Keep hem width and drape close to reference.
+11) If more space is needed, expand environment and continue legs/body naturally; do NOT resize or reshape the garment itself.
+`;
+};
+
+export const analyzeUserPhoto = async (
+  base64Image: string,
+  mimeType: string,
+  apiKey?: string
+): Promise<UserPhotoAnalysis> => {
+  const ai = new GoogleGenAI({ apiKey: getApiKeyOrThrow(apiKey) });
+  const imagePart = fileToGenerativePart(base64Image, mimeType);
+
+  const prompt = `
+    Analyze user photo for virtual try-on.
+
+    Return strict JSON with fields:
+    - isValid: boolean
+    - message: string in Russian
+    - pose: one of ["front","side","three_quarter","unknown"]
+    - bodyCoverage: one of ["full","two_thirds","portrait","unknown"]
+
+    Validation rules:
+    1) Valid only if a real human is present.
+    2) Valid only if body is at least from knees up ("two_thirds") or full.
+    3) Invalid for random objects, animals, empty scenes, mannequins.
+    4) Invalid for close portrait/head-only shots.
+
+    Pose guidance:
+    - "front": torso mostly facing camera.
+    - "side": strong side profile / body turned ~70-110 degrees.
+    - "three_quarter": between front and side.
+    - "unknown": unclear.
+  `;
+
+  const response = await generateWithFallback(ai, (model) => ({
+    model,
+    contents: {
+      parts: [imagePart, { text: prompt }],
+    },
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          isValid: { type: Type.BOOLEAN },
+          message: { type: Type.STRING },
+          pose: { type: Type.STRING, enum: ['front', 'side', 'three_quarter', 'unknown'] },
+          bodyCoverage: { type: Type.STRING, enum: ['full', 'two_thirds', 'portrait', 'unknown'] },
+        },
+        required: ["isValid", "message", "pose", "bodyCoverage"],
+      },
+    },
+  }));
+
+  if (response.text) {
+    return JSON.parse(response.text);
+  }
+
+  return {
+    isValid: false,
+    message: "Не удалось проанализировать фото.",
+    pose: 'unknown',
+    bodyCoverage: 'unknown',
+  };
+};
+
 export const generateVirtualTryOnImage = async (
   personImage: { base64: string; mimeType: string },
   clothingImage: { base64: string; mimeType: string },
-  apiKey?: string
+  apiKey?: string,
+  modelMode: TryOnModelMode = 'pro',
+  fitContext?: {
+    userPose?: UserPose;
+    clothingView?: ClothingView;
+    bodyCoverage?: string;
+    clothingName?: string;
+    clothingFitHint?: ClothingFitHint;
+    clothingLengthHint?: ClothingLengthHint;
+    designNotes?: string;
+    isLongGarment?: boolean;
+    forceTallCanvas?: boolean;
+    generationStage?: TryOnGenerationStage;
+  }
 ): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: getApiKeyOrThrow(apiKey) });
   
   const personImagePart = fileToGenerativePart(personImage.base64, personImage.mimeType);
   const clothingImagePart = fileToGenerativePart(clothingImage.base64, clothingImage.mimeType);
+  let outputAspectRatio: OutputAspectRatio = '3:4';
+  try {
+    const personDimensions = await loadImageDimensionsFromDataUrl(personImage.base64);
+    outputAspectRatio = getClosestAspectRatio(personDimensions.width, personDimensions.height);
+  } catch {
+    outputAspectRatio = '3:4';
+  }
+  if (fitContext?.forceTallCanvas) {
+    outputAspectRatio = '9:16';
+  }
 
-  const prompt = `
-    Task: High-End Virtual Fashion Try-On.
-    Input 1: Person (Target).
-    Input 2: Clothing Item (Source).
+  const prompt = buildTryOnPrompt(fitContext);
 
-    CORE OBJECTIVE: Dress the Person in Input 1 with the Clothing from Input 2.
-
-    ABSOLUTE BODY GEOMETRY LOCK (HIGHEST PRIORITY):
-    1. Do NOT alter the person's body shape, body volume, or proportions.
-    2. Preserve exact silhouette and thickness from Input 1, especially:
-       - shoulder width
-       - neck thickness
-       - chest/bust volume
-       - upper arm and forearm thickness
-       - waist and abdomen volume
-       - hip, thigh, and calf thickness
-    3. Never "slim down" or narrow any body part.
-    4. If there is ambiguity, keep the body in the result equal to or slightly fuller than Input 1, never smaller.
-    5. Garment fit must adapt to the real body shape from Input 1, not vice versa.
-
-    STRICT RULES FOR CLOTHING (SOURCE) PRESERVATION:
-    1. TEXTURE & MATERIAL: You MUST preserve the exact fabric texture (silk, cotton, velvet, denim) of Input 2. Do not smoothen it or change its reflective properties.
-    2. SHAPE & CUT: You MUST preserve the exact cut and silhouette. 
-       - If Input 2 has rolled-up sleeves (elbow length), the result MUST have rolled-up sleeves. DO NOT lower the sleeves to the wrist.
-       - If Input 2 is oversized, it must look oversized on the person.
-       - If Input 2 has an asymmetrical hem, preserve that asymmetry exactly.
-    3. DETAILS: Keep all buttons, pockets, collars, and prints exactly as they appear in Input 2.
-
-    STRICT RULES FOR PERSON (TARGET) PRESERVATION:
-    1. BACKGROUND: Do NOT change pixels of the background.
-    2. BODY: Do NOT change the person's legs, shoes, face, hair, hands, or body proportions. Only generate pixels where the new clothing covers the body.
-    3. LIGHTING: Keep the original lighting direction and temperature of the Person's photo. Cast realistic shadows from the new clothing onto the person/ground based on this lighting.
-
-    FINAL OUTPUT:
-    - A photorealistic image where the clothing looks like it was physically worn in that specific room.
-    - High fashion quality, but natural, unedited "raw photo" look.
-  `;
+  const modelByMode: Record<TryOnModelMode, string> = {
+    pro: 'gemini-3-pro-image-preview',
+    flash: 'gemini-2.5-flash-image',
+  };
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-image-preview',
+    model: modelByMode[modelMode],
     contents: {
       parts: [
+        { text: 'Image A (TARGET PERSON): keep this person identity, body, pose, and scene.' },
         personImagePart,
+        { text: 'Image B (CLOTHING REFERENCE): use only garment design and material from this image.' },
         clothingImagePart,
         { text: prompt },
       ],
@@ -131,7 +358,7 @@ export const generateVirtualTryOnImage = async (
       responseModalities: [Modality.IMAGE],
       imageConfig: {
           imageSize: "1K",
-          aspectRatio: "3:4" 
+          aspectRatio: outputAspectRatio,
       }
     },
   });

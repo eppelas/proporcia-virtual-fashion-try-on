@@ -20,6 +20,15 @@ const readFileAsDataUrl = (file: File): Promise<string> => {
   });
 };
 
+const blobToDataUrl = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => resolve(event.target?.result as string);
+    reader.onerror = () => reject(new Error('Не удалось преобразовать изображение.'));
+    reader.readAsDataURL(blob);
+  });
+};
+
 const canvasToJpegDataUrl = (width: number, height: number, draw: (ctx: CanvasRenderingContext2D) => void) => {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -65,18 +74,44 @@ const convertWithImageTag = async (file: File): Promise<string> => {
   }
 };
 
+const convertWithHeic2Any = async (file: File): Promise<string> => {
+  const module = await import('heic2any');
+  const heic2any = module.default as (options: {
+    blob: Blob;
+    toType: string;
+    quality?: number;
+  }) => Promise<Blob | Blob[]>;
+
+  const converted = await heic2any({
+    blob: file,
+    toType: 'image/jpeg',
+    quality: 0.95,
+  });
+
+  const outputBlob = Array.isArray(converted) ? converted[0] : converted;
+  if (!outputBlob) {
+    throw new Error('Не удалось декодировать HEIC/HEIF.');
+  }
+  return blobToDataUrl(outputBlob);
+};
+
 const convertHeicToJpeg = async (file: File): Promise<UploadedImageData> => {
   try {
-    const base64 = await convertWithImageBitmap(file);
+    const base64 = await convertWithHeic2Any(file);
     return { base64, mimeType: 'image/jpeg' };
   } catch {
     try {
-      const base64 = await convertWithImageTag(file);
+      const base64 = await convertWithImageBitmap(file);
       return { base64, mimeType: 'image/jpeg' };
     } catch {
-      throw new Error(
-        'Формат HEIC/HEIF не декодируется в этом браузере. Откройте в Safari/Chrome на iPhone или экспортируйте фото в JPG.'
-      );
+      try {
+        const base64 = await convertWithImageTag(file);
+        return { base64, mimeType: 'image/jpeg' };
+      } catch {
+        throw new Error(
+          'Не удалось декодировать HEIC/HEIF в этом браузере. Попробуйте другое фото или экспортируйте в JPG.'
+        );
+      }
     }
   }
 };

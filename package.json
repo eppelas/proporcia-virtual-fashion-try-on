@@ -6,12 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "fusara:modify": "python3 scripts/fusara_modify.py",
+    "fusara:qwen": "python3 scripts/fusara_modify.py --model qwen",
+    "fusara:seedream": "python3 scripts/fusara_modify.py --model seedream"
   },
   "dependencies": {
-    "react-dom": "^19.2.0",
+    "@google/genai": "^1.24.0",
+    "heic2any": "^0.0.4",
     "react": "^19.2.0",
-    "@google/genai": "^1.24.0"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -1,13 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import type { ClothingItem } from '../types';
-import UploadIcon from './icons/UploadIcon';
-import { readUploadImageFile } from '../utils/imageFile';
 
 interface ClothingGalleryProps {
   items: ClothingItem[];
   selectedItem: ClothingItem | null;
   onSelectItem: (item: ClothingItem) => void;
-  onUpdateItem?: (id: number, newSrc: string) => void;
   onItemInvalidated?: (id: number) => void;
 }
 
@@ -17,12 +14,10 @@ const ClothingGallery: React.FC<ClothingGalleryProps> = ({
   items, 
   selectedItem, 
   onSelectItem,
-  onUpdateItem,
   onItemInvalidated
 }) => {
   const [currentPage, setCurrentPage] = useState(0);
   const [brokenImages, setBrokenImages] = useState<Record<number, boolean>>({});
-  const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
 
@@ -42,35 +37,6 @@ const ClothingGallery: React.FC<ClothingGalleryProps> = ({
   const handleImageError = (id: number) => {
     setBrokenImages(prev => ({ ...prev, [id]: true }));
     onItemInvalidated?.(id);
-  };
-
-  const handleFileUpload = async (id: number, event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file && onUpdateItem) {
-      try {
-        const { base64 } = await readUploadImageFile(file);
-        onUpdateItem(id, base64);
-        // Reset broken state if it was broken before
-        setBrokenImages(prev => {
-            const newState = { ...prev };
-            delete newState[id];
-            return newState;
-        });
-        // Select the item after upload
-        const updatedItem = items.find(i => i.id === id);
-        if (updatedItem) {
-            onSelectItem({ ...updatedItem, imageSrc: base64 });
-        }
-      } catch (error) {
-        window.alert(
-          error instanceof Error ? error.message : 'Не удалось загрузить изображение.'
-        );
-      }
-    }
-  };
-
-  const triggerUpload = (id: number) => {
-    fileInputRefs.current[id]?.click();
   };
 
   return (
@@ -102,18 +68,15 @@ const ClothingGallery: React.FC<ClothingGalleryProps> = ({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-x-2 gap-y-8">
         {currentItems.map((item) => {
           const isBroken = brokenImages[item.id];
-          const isUploadable = item.isUploadable;
           const hasImage = item.imageSrc && item.imageSrc.length > 0;
           
           return (
             <div
               key={item.id}
               onClick={() => {
-                  if (isUploadable && !hasImage) {
-                      triggerUpload(item.id);
-                  } else if (!isBroken && hasImage) {
-                      onSelectItem(item);
-                  }
+                if (!isBroken && hasImage) {
+                  onSelectItem(item);
+                }
               }}
               className="group cursor-pointer flex flex-col"
             >
@@ -121,26 +84,7 @@ const ClothingGallery: React.FC<ClothingGalleryProps> = ({
                  ${selectedItem?.id === item.id ? 'ring-1 ring-black p-[2px]' : ''}
                  hover:shadow-sm transition-shadow
               `}>
-                {/* Upload Input for Custom Slots */}
-                {isUploadable && (
-                    <input
-                        type="file"
-                        className="hidden"
-                        accept="image/png, image/jpeg, image/webp, image/heic, image/heif, .heic, .heif"
-                        ref={(el) => { fileInputRefs.current[item.id] = el; }}
-                        onChange={(e) => handleFileUpload(item.id, e)}
-                    />
-                )}
-
-                {/* Case 1: Uploadable but empty */}
-                {isUploadable && !hasImage ? (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 hover:text-black hover:bg-gray-100 transition-colors">
-                        <UploadIcon className="w-6 h-6 mb-2 opacity-50" />
-                        <span className="text-[9px] uppercase font-bold">Загрузить</span>
-                    </div>
-                ) : (
-                    // Case 2: Normal Image or Uploaded Image
-                    !isBroken ? (
+                {!isBroken ? (
                         <>
                             <img 
                                 src={item.imageSrc} 
@@ -150,15 +94,6 @@ const ClothingGallery: React.FC<ClothingGalleryProps> = ({
                                 ${selectedItem?.id === item.id ? 'opacity-100' : 'opacity-95'}
                                 `} 
                             />
-                            {/* Allow changing custom image */}
-                            {isUploadable && (
-                                <div 
-                                    onClick={(e) => { e.stopPropagation(); triggerUpload(item.id); }}
-                                    className="absolute bottom-2 right-2 bg-white/80 p-1.5 rounded-full hover:bg-white transition-colors"
-                                >
-                                    <UploadIcon className="w-3 h-3 text-black" />
-                                </div>
-                            )}
                         </>
                     ) : (
                          <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100 text-gray-400 text-[10px] text-center p-2 overflow-hidden break-all">
@@ -166,7 +101,7 @@ const ClothingGallery: React.FC<ClothingGalleryProps> = ({
                              <span className="text-[8px] opacity-50 leading-tight line-clamp-4">{item.imageSrc}</span>
                          </div>
                     )
-                )}
+                }
 
                  {selectedItem?.id === item.id && !isBroken && hasImage && (
                    <div className="absolute top-2 right-2 w-1.5 h-1.5 bg-black rounded-full" />

@@ -8,9 +8,10 @@ interface ResultDisplayProps {
   generatedImage: string | null;
   isLoading: boolean;
   error: string | null;
+  buyUrl?: string;
 }
 
-const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, isLoading, error }) => {
+const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, isLoading, error, buyUrl }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const handleDownload = (e: React.MouseEvent) => {
@@ -31,11 +32,19 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, isLoading
     }
   };
 
+  const handleBuy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (buyUrl) {
+      window.open(buyUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   return (
     <>
-      <div 
-        className="w-full h-full bg-gray-50 flex items-center justify-center overflow-hidden border border-transparent relative group"
-      >
+      <div className="w-full">
+        <div 
+          className="w-full aspect-[3/4] bg-gray-50 flex items-center justify-center overflow-hidden border border-transparent relative group"
+        >
           {isLoading && (
             <div className="flex flex-col items-center animate-pulse">
               <SpinnerIcon className="h-4 w-4 text-black mb-2 animate-spin" />
@@ -54,7 +63,7 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, isLoading
                 <img 
                   src={generatedImage} 
                   alt="Result" 
-                  className="h-full w-full object-cover cursor-pointer"
+                  className="h-full w-full object-contain bg-gray-100 cursor-pointer"
                   onClick={toggleModal}
                 />
                 
@@ -76,23 +85,37 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, isLoading
                     </button>
                 </div>
 
-                {/* Always-visible download CTA */}
-                <div className="absolute left-3 right-3 bottom-3">
-                  <button
-                    onClick={handleDownload}
-                    className="w-full bg-black text-white py-3 text-[11px] font-bold uppercase tracking-[0.15em] flex items-center justify-center gap-2 hover:bg-gray-900 transition-colors shadow-lg"
-                    title="Скачать результат"
-                  >
-                    <DownloadIcon className="w-4 h-4" />
-                    Скачать результат
-                  </button>
-                </div>
              </div>
           ) : (
               !isLoading && !error && (
                   <p className="text-[9px] uppercase tracking-widest text-gray-300">Результат</p>
               )
           )}
+        </div>
+        {generatedImage && (
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              onClick={handleDownload}
+              className="bg-black text-white py-3 text-[11px] font-bold uppercase tracking-[0.12em] flex items-center justify-center gap-2 hover:bg-gray-900 transition-colors shadow-lg"
+              title="Скачать результат"
+            >
+              <DownloadIcon className="w-4 h-4" />
+              Скачать
+            </button>
+            <button
+              onClick={handleBuy}
+              disabled={!buyUrl}
+              className={`py-3 text-[11px] font-bold uppercase tracking-[0.12em] border shadow-lg transition-colors ${
+                buyUrl
+                  ? 'bg-white text-black border-black hover:bg-black hover:text-white'
+                  : 'bg-white text-gray-300 border-gray-200 cursor-not-allowed'
+              }`}
+              title="Купить образ"
+            >
+              Купить образ
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Full Screen Modal */}
@@ -111,13 +134,26 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, isLoading
             className="max-h-full max-w-full object-contain shadow-2xl" 
           />
           
-          <button 
-            onClick={handleDownload}
-            className="absolute bottom-8 bg-white text-black px-6 py-3 rounded-full font-bold uppercase text-xs tracking-widest flex items-center gap-2 hover:bg-gray-200 transition-colors"
-          >
-            <DownloadIcon className="w-4 h-4" />
-            Скачать
-          </button>
+          <div className="absolute bottom-8 flex gap-2">
+            <button 
+              onClick={handleDownload}
+              className="bg-white text-black px-6 py-3 rounded-full font-bold uppercase text-xs tracking-widest flex items-center gap-2 hover:bg-gray-200 transition-colors"
+            >
+              <DownloadIcon className="w-4 h-4" />
+              Скачать
+            </button>
+            <button
+              onClick={handleBuy}
+              disabled={!buyUrl}
+              className={`px-6 py-3 rounded-full font-bold uppercase text-xs tracking-widest transition-colors ${
+                buyUrl
+                  ? 'bg-white text-black hover:bg-gray-200'
+                  : 'bg-white/50 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              Купить образ
+            </button>
+          </div>
         </div>
       )}
     </>

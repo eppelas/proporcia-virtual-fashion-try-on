@@ -42,7 +42,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, userImage 
       >
         {userImage ? (
           <>
-            <img src={userImage} alt="Preview" className="h-full w-full object-cover" />
+            <img src={userImage} alt="Preview" className="h-full w-full object-contain bg-gray-100" />
             <div className="absolute bottom-0 w-full bg-white/90 py-2 text-center opacity-0 hover:opacity-100 transition-opacity">
                  <span className="text-[9px] uppercase font-bold tracking-widest">Изменить фото</span>
             </div>
@@ -50,7 +50,12 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, userImage 
         ) : (
           <>
             <UploadIcon className="h-4 w-4 text-gray-400 mb-2" />
-            <p className="text-[9px] uppercase tracking-widest text-black font-bold">Ваше фото</p>
+            <p className="text-[9px] uppercase tracking-widest text-black font-bold">Добавить свое фото</p>
+            <p className="mt-2 px-6 text-center text-[9px] leading-relaxed text-gray-400 uppercase tracking-[0.08em]">
+              Человек в кадре
+              <br />
+              Минимум от колен и выше
+            </p>
           </>
         )}
       </div>
