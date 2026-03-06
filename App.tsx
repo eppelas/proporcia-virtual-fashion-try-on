@@ -632,8 +632,16 @@ const App: React.FC = () => {
             <div className="max-w-[380px] mx-auto">
               <ResultDisplay 
                 generatedImage={activeResultImage}
-                isLoading={isLoadingPro}
-                error={errorPro}
+                isLoading={
+                  selectedModel === 'pro'
+                    ? isLoadingPro
+                    : isLoadingPro
+                }
+                error={
+                  selectedModel === 'pro'
+                    ? errorPro
+                    : errorPro
+                }
                 buyUrl={activeBuyUrl}
               />
             </div>
